@@ -1,0 +1,397 @@
+//------------------Overspeed detection------------
+
+  #include <SPI.h>
+#include <MFRC522.h>
+#define BLYNK_PRINT Serial
+#include <ESP8266WiFi.h> //Library for NodeMCU
+#include <BlynkSimpleEsp8266.h> //Library for Blynk
+#include "FirebaseESP8266.h" //Library for Firebase
+#define SS_PIN_1 D2 //D2
+#define SS_PIN_2 D4 //D4
+#define RST_PIN D3 //D3
+
+//firebase iniializaton
+#define FIREBASE_HOST "smartspeeddetector-default-rtdb.firebaseio.com"  //Firebase Host
+#define FIREBASE_AUTH "4hka0w7WNJS3FRfwL8BBGj6F6zR5CBnwqTyrYRxh" //Firebase Auth
+#define WIFI_SSID "SOFTWARICA IOT EXPO 2021" //wifi SSID
+#define WIFI_PASSWORD "coventry" //Wifi Password00
+
+
+//Define FirebaseESP8266 data object
+FirebaseData firebaseData;
+//FirebaseData ledData;
+
+//FirebaseJson json;
+
+MFRC522 rfidOne(SS_PIN_1, RST_PIN);   // Create MFRC522 instance.
+MFRC522 rfidTwo(SS_PIN_2, RST_PIN);   // Create MFRC522 instance.
+
+int timer1;
+int timer2;
+String car1="";
+String car2="";
+float Time;
+
+int flag1 = 0;
+int flag2 = 0;
+
+//https://smartspeeddetector-default-rtdb.firebaseio.com/
+
+float distance = 5.0;
+float speed;
+
+////for blink
+char auth[] = "yXqN74ZzOR7pIJlkuNKhN9v3oVg08Qov";  //Auth code sent via Email
+char ssid[] = "SOFTWARICA IOT EXPO 2021";  //Wifi name
+char pass[] = "coventry"; 
+
+void setup() 
+{
+  Serial.begin(9600);   // Initiate a serial communication
+
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED)
+  {
+ 
+    Serial.print(".");
+    delay(300);
+  }
+  Serial.println();
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+
+  //firebase connection
+  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+  Firebase.reconnectWiFi(true);
+//
+  Blynk.begin(auth, ssid, pass);
+//  
+  SPI.begin();      // Initiate  SPI bus
+  rfidOne.PCD_Init();   // Initiate MFRC522
+  rfidTwo.PCD_Init();   // Initiate MFRC522
+  Serial.println("Approximate your card to the reader...");
+  Serial.println();
+}
+void loop() 
+{
+  // Look for new cards
+  if (rfidOne.PICC_IsNewCardPresent()&& rfidOne.PICC_ReadCardSerial() && car1=="") 
+  {
+    timer1 = millis();
+    String content= "";
+    for (byte i = 0; i < rfidOne.uid.size; i++) 
+    {
+//       Serial.print(rfidOne.uid.uidByte[i] < 0x10 ? " 0" : " ");
+//       Serial.print(rfidOne.uid.uidByte[i], HEX);
+       content.concat(String(rfidOne.uid.uidByte[i] < 0x10 ? " 0" : " "));
+       content.concat(String(rfidOne.uid.uidByte[i], HEX));
+    }
+    content.toUpperCase();
+    Serial.println("Intial Timer "+timer1);
+    car1=content.substring(1);
+    rfidOne.PICC_HaltA();
+    rfidOne.PCD_StopCrypto1();
+    
+    
+  }
+  if (rfidTwo.PICC_IsNewCardPresent()&& rfidTwo.PICC_ReadCardSerial() && car2=="") 
+  {
+    timer2 = millis(); 
+    String content= "";
+    for (byte i = 0; i < rfidTwo.uid.size; i++) 
+    {
+//       Serial.print(rfidTwo.uid.uidByte[i] < 0x10 ? " 0" : " ");
+//       Serial.print(rfidTwo.uid.uidByte[i], HEX);
+       content.concat(String(rfidTwo.uid.uidByte[i] < 0x10 ? " 0" : " "));
+       content.concat(String(rfidTwo.uid.uidByte[i], HEX));
+    }
+    content.toUpperCase();
+    car2=content.substring(1);
+    rfidTwo.PICC_HaltA();
+    rfidTwo.PCD_StopCrypto1();
+    
+  }
+  if (car1!="" && car1==car2){
+     if(timer1 > timer2){Time = timer1 - timer2;}
+     else if(timer2 > timer1){Time = timer2 - timer1;}
+     
+     Time=Time/1000;//convert millisecond to second
+     speed=(distance/Time);//v=d/t
+     speed=speed*3600;//multiply by seconds per hr
+     speed=speed/1000;//division by meters per Km
+     
+     if(speed > 10){
+      Serial.println("Over Speeding detected of car number " + car1+ " with speed "+speed+"Km/hr");
+      String Overspeed =   String("/Overspeed/")+String(car1);
+      String Speed =  String(speed)+String("Km/hr");
+      Firebase.setString(firebaseData, Overspeed, Speed);
+//      Blynk.notify("You have been caught for overspeeding of " + Speed +" at retricted area");
+      }    
+    delay(500);
+    speed = 0;
+    car1="";
+    car2="";   
+  }
+  if(car1!="" && car2!="" && car1!=car2){
+    car1=="";
+    car2=="";
+    timer1=0;
+    timer2=0;
+  }
+}
+
+
+//------------------------------------------Congestion detection------------------
+
+#include <Wire.h> 
+#include <LiquidCrystal_I2C.h>
+#include <Servo.h>
+
+int cm1 = 0;
+int cm2 = 0;
+int counter = 0;
+int servoPin = 7;
+
+Servo Servo1; 
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+long readUltrasonicDistance(int triggerPin, int echoPin)
+{
+  pinMode(triggerPin, OUTPUT);  // Clear the trigger
+  digitalWrite(triggerPin, LOW);
+  delayMicroseconds(2);
+  // Sets the trigger pin to HIGH state for 10 microsesconds
+  digitalWrite(triggerPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(triggerPin, LOW);
+  pinMode(echoPin, INPUT);
+  // Reads the echo pin, and returns the sound wave travel time in microseconds
+  return pulseIn(echoPin, HIGH);
+}
+
+void setup()
+{
+  Serial.begin(9600);
+  Servo1.attach(servoPin);
+}
+
+void loop()
+{
+  // measure the ping time in cm
+  cm1 = 0.01723 * readUltrasonicDistance(8, 9);
+  // convert to inches by dividing by 2.54
+  cm2 = 0.01723 * readUltrasonicDistance(10, 11);
+
+ 
+
+  lcd.init();
+  lcd.backlight();
+
+ 
+
+  Serial.print(cm1);
+  Serial.println(" cm ");
+   Serial.print(cm2);
+  Serial.println(" cm ");
+  checkTraffic();
+}
+void checkTraffic(){
+  if(cm2 >=1 && cm2 <=9 && cm1>=1 && cm1 <=9){
+    lcd.setCursor(0,0);
+    lcd.print("Traffic Jam");
+    lcd.setCursor(0,1);
+    lcd.print("Take another way");
+
+ 
+
+    // Make servo go to 180 degrees 
+   Servo1.write(120); 
+  }
+    else{
+    lcd.print("    Welcome");
+    lcd.setCursor(0,1);
+    lcd.print("  Drive Safe");
+
+ 
+
+    // Make servo go to 0 degrees 
+   Servo1.write(30); 
+  }
+}
+
+//------------traffic light one---------
+int red1 = 13;int yellow1 = 12;
+int green1 = 11;int red2 = 10;
+int yellow2 = 9;int green2 = 8;
+
+
+void setup()
+{
+  for(int i = 8; i<=13; i++) {
+    pinMode(i, OUTPUT);
+  }
+}
+
+void loop()
+{ 
+  direction(red1, yellow1, green1, red2, yellow2, green2);
+  direction(red2, yellow2, green2, red1, yellow1, green1);
+}
+
+void direction(int a, int b, int c, int d, int e, int f)
+{
+  digitalWrite(a, LOW);  digitalWrite(b, LOW);
+  digitalWrite(c, HIGH);  digitalWrite(d, HIGH);
+  digitalWrite(e, LOW);  digitalWrite(f, LOW);
+  delay(5000);
+  digitalWrite(c, LOW);  digitalWrite(b, HIGH);
+  delay(3000);
+}
+
+//------------traffic light two--int red1 = 13;int yellow1 = 12;int green1 = 11;int red2 = 10;
+int yellow2 = 9;int green2 = 8;int red3 = 7;int yellow3 = 6;
+int green3 = 5;int red4 = 4;int yellow4 = 3;int green4 = 2;
+
+void setup()
+{
+  for(int i = 2; i<=13; i++) {
+    pinMode(i, OUTPUT);
+  }
+}
+
+void loop()
+{ 
+  direction(red1, yellow1, green1, red2, yellow2, green2, red3, yellow3, green3, red4, yellow4, green4);
+  direction(red2, yellow2, green2, red1, yellow1, green1, red3, yellow3, green3, red4, yellow4, green4);
+  direction(red3, yellow3, green3, red1, yellow1, green1, red2, yellow2, green2, red4, yellow4, green4);
+  direction(red4, yellow4, green4, red1, yellow1, green1, red2, yellow2, green2, red3, yellow3, green3);
+}
+
+void direction(int a, int b, int c, int d, int e, int f, int g, int h, int i, int j, int k, int l)
+{
+  digitalWrite(a, LOW);  digitalWrite(b, LOW);  digitalWrite(c, HIGH);  digitalWrite(d, HIGH);
+  digitalWrite(e, LOW);  digitalWrite(f, LOW);  digitalWrite(g, HIGH);  digitalWrite(h, LOW);
+  digitalWrite(i, LOW);  digitalWrite(j, HIGH);  digitalWrite(k, LOW);  digitalWrite(l, LOW);
+  delay(5000);  digitalWrite(c, LOW);  digitalWrite(b, HIGH);  delay(3000);
+}
+
+
+//-----------------------------smart parking------
+
+#include <LiquidCrystal_I2C.h> //Incuding Library for LCD with I2C Adapter
+#include <ESP8266WiFi.h> //Library for NodeMCU
+#include <Wire.h> 
+#include <Servo.h> //Library for Servo Motors
+String Available = ""; //availability string
+String lcdDisplay = "";
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+
+Servo carenteringservo;   //servo as enter gate
+Servo carexitingservo;    //servo as exit gate                      
+int countYes = 0 ;        //Initializing counter as 0
+int carEnter = 0;       // entry sensor D3
+int carExited = 2;      //exit sensor D4               
+int pos;
+int pos1;
+int Empty;      //available space integer
+int Empty1;      //available space integer
+int allSpace = 5;
+
+
+
+
+void setup() {
+  delay(1000);
+  Serial.begin (9600);     // serial debugging  
+  pinMode(carExited, INPUT);    // ir as input
+  pinMode(carEnter, INPUT);     // ir as input
+  carexitingservo.attach(D5);      // servo pin to D7
+  carenteringservo.attach(D8);       // servo pin to D8
+
+  carenteringservo.write(150);
+  carexitingservo.write(55);
+  
+  lcd.init();  //Initializing LCD
+  lcd.backlight(); 
+  lcd.setCursor(0,0); //Setting LCD ROW and Column
+  lcd.print("Smart Parking");  
+}
+
+void CarEntering(){
+  int carEntry = digitalRead(carEnter);      // read ir input
+  if(countYes < 5){
+    
+  if (carEntry == LOW) {                     // if low then count and send data
+    countYes = countYes + 1;                 //increment count
+    Serial.print("Car Entered = " );
+    Serial.println(countYes );
+    for (pos = 150; pos >= 55; pos -= 1) {        // change servo position
+      carenteringservo.write(pos);                       
+    }
+    delay(2000);
+
+    for (pos = 55; pos <= 150; pos += 1) {       // change servo position
+      // in steps of 1 degree
+      carenteringservo.write(pos);
+      delay(5);
+    }
+    lcd.setCursor(0,1); //Setting LCD ROW and Column
+  lcd.print(lcdDisplay); 
+  
+  }
+ }
+     else{
+    lcd.setCursor(0,1); //Setting LCD ROW and Column
+    lcd.print("Sorry No Space");
+  }
+}
+
+
+
+void CarExiting(){
+  int carExit = digitalRead(carExited); //read exit ir sensor   
+ if(countYes > 0 ){
+              
+   if (carExit == LOW) {                           //if low then count and send
+    countYes = countYes - 1;                                    //decrement count
+    Serial.print("Remaining Cars = " ); 
+    Serial.println(countYes);
+
+    for (pos = 55; pos <= 140; pos += 1) {       // change servo position
+      // in steps of 1 degree
+      carexitingservo.write(pos);
+    }
+    delay(2000);
+
+    for (pos = 140; pos >= 55; pos -= 1) {        // change servo position
+      carexitingservo.write(pos);                       
+    }
+    
+
+    
+    
+  }
+ }
+}
+
+
+
+void loop() {
+   CarEntering();
+   CarExiting();
+
+  Serial.println(countYes);
+  Empty = allSpace - (countYes + 1); //calculate available data
+  Empty1 = allSpace - (countYes - 1);
+  lcdDisplay = String("Available= ") + String(allSpace - countYes) + String("/") + String(allSpace);
+  Available = String("Available= ") + String(Empty) + String("/") + String(allSpace); // convert the int to string
+  lcd.setCursor(0,1);
+  lcd.print(lcdDisplay);
+
+}
